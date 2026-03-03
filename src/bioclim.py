@@ -45,8 +45,9 @@ def temperature_raw_to_monthly(
 
     # monthly = ds_daily.groupby("valid_time.month").mean()
 
-    monthly = ds_daily.resample(valid_time="1M").mean()
-    monthly = monthly.rename({"valid_time": "time"})
+    monthly = ds_daily.resample(valid_time="MS").mean()
+    
+    monthly = clean_datasets(monthly)
 
     # --- Write to a temp file first ---
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".nc", dir=out_dir)
@@ -80,11 +81,20 @@ def water_raw_to_monthly(
         }
     )
     ds_water = ds_water.assign_coords(month=ds_water.valid_time.dt.month)
-    ds_water = ds_water.groupby("month").mean(dim="valid_time")
-    print(ds_water)
+    ds_water = ds_water.resample(valid_time="MS").mean()
+
+    ds_water = clean_datasets(ds_water)
 
     ds_water.to_netcdf(f"{out_dir}/water_monthly_{year}.nc")
 
+def clean_datasets(ds: xr.Dataset, allowed_attrs:list[str]=["units", "long_name"], allowed_coords:list[str]=["valid_time", "latitude", "longitude"]) -> xr.Dataset:
+    ds.attrs = {}
+    for var in ds.data_vars:
+        ds[var].attrs = {k: v for k, v in ds[var].attrs.items() if k in allowed_attrs}
+
+    drop_coords = [c for c in ds.coords if c not in allowed_coords]
+    ds = ds.drop_vars(drop_coords)
+    return ds
 
 def climatological_aggregate(
     data_dir: str = "./data/monthly", out_dir: str = "./data/climatology"
