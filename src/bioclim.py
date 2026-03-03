@@ -3,6 +3,7 @@ import shutil
 import tempfile
 
 import xarray as xr
+import rioxarray # noqa: F401
 from dask.distributed import LocalCluster, Client
 
 
@@ -102,7 +103,13 @@ def climatological_aggregate(
         }
     )
 
-    clim = ds.groupby("month").mean()
+    clim = ds.groupby("valid_time.month").mean("valid_time")
+    
+    # Add CRS information and reproject coordinates
+    clim = clim.rio.write_crs("EPSG:4326")
+    clim.coords["longitude"] = (((clim.longitude + 180) % 360) - 180)
+    clim = clim.sortby("longitude")
+    
     clim.to_netcdf(f"{out_dir}/climatology_monthly.nc")
 
 
@@ -225,19 +232,6 @@ def calc_bioclim(data_dir: str = "./data/climatology", out_dir: str = "./data/bi
             "bio19": BIO19,
         }
     )
-    print(bio_ds.longitude.min(), bio_ds.longitude.max())
 
-    bio_ds = bio_ds.assign_coords(
-        longitude=(((bio_ds.longitude + 180) % 360) - 180),
-    )
-    bio_ds = bio_ds.sortby("longitude")
-    print(bio_ds.longitude.min(), bio_ds.longitude.max())
-    bio_ds.to_netcdf(
-        out_file, encoding={v: {"zlib": True, "complevel": 5} for v in bio_ds.data_vars}
-    )
-
-
-if __name__ == "__main__":
-    # temperature_raw_to_monthly(1985)
-    # climatological_aggregate()
-    calc_bioclim()
+    bio_ds = bio_ds.rio.write_crs("EPSG:4326")
+    bio_ds.to_netcdf(out_file)

@@ -10,6 +10,7 @@ dependencies = [
     "dask[distributed]>=2026.1.2",
     "destinelab>=1.13",
     "netcdf4>=1.7.4",
+    "rioxarray>=0.20.0",
     "tqdm>=4.67.3",
     "types-requests>=2.32.4.20260107",
     "types-tqdm>=4.67.3.20260205",
