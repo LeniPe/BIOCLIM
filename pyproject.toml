@@ -1,0 +1,29 @@
+[project]
+name = "bioclim"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bokeh>=3.8.2",
+    "cfgrib>=0.9.15.1",
+    "dask[distributed]>=2026.1.2",
+    "destinelab>=1.13",
+    "netcdf4>=1.7.4",
+    "tqdm>=4.67.3",
+    "types-requests>=2.32.4.20260107",
+    "types-tqdm>=4.67.3.20260205",
+    "xarray>=2026.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.2",
+    "mypy>=1.19.1",    
+]
+
+notebooks = [
+    "matplotlib",
+    "ipykernel",
+    "dotenv>=0.9.9",
+]
