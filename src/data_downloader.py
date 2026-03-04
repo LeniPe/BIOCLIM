@@ -182,7 +182,7 @@ class DEDLDownloader:
 
     def download_year(
         self, year: int, variable: str, collection: str, output_dir: str = "./data/raw"
-    ) -> list[str]:
+    ) -> list[bool]:
         os.makedirs(output_dir, exist_ok=True)
         pending_orders: list[dict[str, str]] = []
 
@@ -218,7 +218,7 @@ class DEDLDownloader:
             try:
                 status_url = self.place_order(
                     year, 0, variable, collection
-                )  # month=0 for whole year
+                )
                 pending_orders.append(
                     {"url": status_url, "path": save_path, "month": "full_year"}
                 )
@@ -235,9 +235,6 @@ class DEDLDownloader:
 
         for order in pending_orders:
             success = self.download_file(order["url"], order["path"], order["month"])
-            if success:
-                results.append(order["path"])
-            else:
-                print(f"⚠️ Order {order['month']} failed to process.")
+            results.append(success)
 
         return results

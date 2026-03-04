@@ -2,36 +2,57 @@ import os
 import shutil
 import tempfile
 
+from dask import config as dask_config
 import xarray as xr
 import rioxarray # noqa: F401
 from dask.distributed import LocalCluster, Client
 
 
 def temperature_raw_to_monthly(
-    year: int, raw_dir: str = "./data/raw", out_dir: str = "./data/monthly"
+    year: int,
+    raw_dir: str = "./data/raw",
+    out_dir: str = "./data/monthly",
+    dask_mode: str = "local",
+    dask_workers: int = 1,
+    dask_threads_per_worker: int = 4,
+    dask_memory_limit: str = "60GB",
+    temp_time_chunk: int = 24,
+    temp_lat_chunk: int = 300,
+    temp_lon_chunk: int = 300,
 ):
     # Ensure output directory exists
     os.makedirs(out_dir, exist_ok=True)
 
-    # --- Setup Dask cluster ---
-    cluster = LocalCluster(
-        n_workers=1,
-        threads_per_worker=4,
-        memory_limit="60GB",
-    )
-    _client = Client(cluster)
+    cluster = None
+    if dask_mode == "local":
+        dask_config.set(
+            {
+                "distributed.worker.memory.target": 0.6,
+                "distributed.worker.memory.spill": 0.7,
+                "distributed.worker.memory.pause": 0.85,
+                "distributed.worker.memory.terminate": 0.98,
+            }
+        )
+        cluster = LocalCluster(
+            n_workers=dask_workers,
+            threads_per_worker=dask_threads_per_worker,
+            memory_limit=dask_memory_limit,
+        )
+        _client = Client(cluster)
 
     print(f"Processing {year}")
 
     temp_file = f"{raw_dir}/2m_temperature_{year}_*.nc"
-    ds_temp = xr.open_mfdataset(temp_file, chunks={}, parallel=False, engine="netcdf4")
-
-    ds_temp = ds_temp.chunk(
-        {
-            "valid_time": -1,
-            "latitude": -1,
-            "longitude": 900,
-        }
+    ds_temp = xr.open_mfdataset(
+        temp_file,
+        chunks={
+            "valid_time": temp_time_chunk,
+            "latitude": temp_lat_chunk,
+            "longitude": temp_lon_chunk,
+        },
+        parallel=False,
+        engine="netcdf4",
+        combine="by_coords",
     )
 
     daily = ds_temp.t2m.resample(valid_time="1D")
@@ -54,7 +75,8 @@ def temperature_raw_to_monthly(
     os.close(tmp_fd)  # Close the file descriptor; xarray will handle writing
 
     monthly.to_netcdf(tmp_path)
-    cluster.close()
+    if cluster is not None:
+        cluster.close()
 
     # --- Move temp file to final destination only on success ---
     final_path = f"{out_dir}/temperature_monthly_{year}.nc"
@@ -114,6 +136,7 @@ def climatological_aggregate(
     )
 
     clim = ds.groupby("valid_time.month").mean("valid_time")
+    clim = clean_datasets(clim)
     
     # Add CRS information and reproject coordinates
     clim = clim.rio.write_crs("EPSG:4326")
@@ -126,17 +149,16 @@ def climatological_aggregate(
 def calc_bioclim(data_dir: str = "./data/climatology", out_dir: str = "./data/bioclim"):
     os.makedirs(out_dir, exist_ok=True)
     out_file = f"{out_dir}/bioclim.nc"
-    ds = xr.open_dataset(f"{data_dir}/climatology_monthly.nc")
+    ds = xr.open_dataset(f"{data_dir}/climatology_monthly.nc", engine="netcdf4")
 
     quarter_index = ((ds.month - 1) // 3) + 1
 
-    T_mean_quarter = (
+    T_mean_quarter: xr.DataArray = (
         ds.T_mean.groupby(quarter_index).mean("month").rename({"month": "quarter"})
     )
-    W_mean_quarter = (
+    W_mean_quarter: xr.DataArray = (
         ds.W_mean.groupby(quarter_index).mean("month").rename({"month": "quarter"})
     )
-    print(W_mean_quarter)
 
     # BIO1
     BIO1 = ds.T_mean.mean("month")
@@ -175,49 +197,22 @@ def calc_bioclim(data_dir: str = "./data/climatology", out_dir: str = "./data/bi
     BIO16 = W_mean_quarter.max("quarter")
     BIO17 = W_mean_quarter.min("quarter")
 
-    # 1. valid land mask
     valid_mask = W_mean_quarter.notnull().any("quarter")
 
-    # 2. compute indices safely
     wettest_q = W_mean_quarter.fillna(1).argmax("quarter")
     driest_q = W_mean_quarter.fillna(4).argmin("quarter")
     warmest_q = T_mean_quarter.fillna(1).argmax("quarter")
     coldest_q = T_mean_quarter.fillna(4).argmin("quarter")
 
-    # # 3. Mask ocean pixels
-    # wettest_q = wettest_q.where(valid_mask)
-    # driest_q  = driest_q.where(valid_mask)
-    # warmest_q = warmest_q.where(valid_mask)
-    # coldest_q = coldest_q.where(valid_mask)
+    BIO8 = T_mean_quarter.isel(quarter=wettest_q).drop_vars("quarter")
+    BIO9 = T_mean_quarter.isel(quarter=driest_q).drop_vars("quarter")
+    BIO18 = W_mean_quarter.isel(quarter=warmest_q).drop_vars("quarter")
+    BIO19 = W_mean_quarter.isel(quarter=coldest_q).drop_vars("quarter")
 
-    # # 4. Compute the arrays as integers
-    # wettest_q = wettest_q.compute().astype("Int32")  # note capital 'I' -> nullable int
-    # driest_q  = driest_q.compute().astype("Int32")
-    # warmest_q = warmest_q.compute().astype("Int32")
-    # coldest_q = coldest_q.compute().astype("Int32")
-
-    BIO8 = T_mean_quarter.isel(quarter=wettest_q).drop("quarter")
-    BIO9 = T_mean_quarter.isel(quarter=driest_q).drop("quarter")
-    BIO18 = W_mean_quarter.isel(quarter=warmest_q).drop("quarter")
-    BIO19 = W_mean_quarter.isel(quarter=coldest_q).drop("quarter")
-
-    # mask ocean pixels
     BIO8 = BIO8.where(valid_mask)
     BIO9 = BIO9.where(valid_mask)
     BIO18 = BIO18.where(valid_mask)
     BIO19 = BIO19.where(valid_mask)
-
-    # wettest_q = W_mean_quarter.argmax("quarter")
-    # driest_q = W_mean_quarter.argmin("quarter")
-    # warmest_q = T_mean_quarter.argmax("quarter")
-    # coldest_q = T_mean_quarter.argmin("quarter")
-
-    # BIO8 = T_mean_quarter.isel(quarter=wettest_q)
-    # BIO9 = T_mean_quarter.isel(quarter=driest_q)
-    # BIO18 = W_mean_quarter.isel(quarter=warmest_q)
-    # BIO19 = W_mean_quarter.isel(quarter=coldest_q)
-    print(BIO8)
-    print(BIO1)
 
     bio_ds = xr.Dataset(
         {
