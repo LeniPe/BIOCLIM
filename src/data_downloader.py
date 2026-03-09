@@ -78,7 +78,9 @@ class DEDLDownloader:
             + (f". Last error: {last_error}" if last_error else "")
         )
 
-    def get_payload(self, year: int, month: int, variable: str, collection: str):
+    def build_order_payload(
+        self, year: int, month: int, variable: str, collection: str
+    ):
         """Constructs the payload for ordering data."""
         if collection == "EO.ECMWF.DAT.ERA5_LAND_MONTHLY":
             payload = {
@@ -105,12 +107,14 @@ class DEDLDownloader:
             raise ValueError(f"Unsupported collection: {collection}")
         return payload
 
-    def place_order(self, year: int, month: int, variable: str, collection: str):
+    def submit_order_request(
+        self, year: int, month: int, variable: str, collection: str
+    ):
         """Orders data and polls until the download link is ready."""
         order_url = f"{self.base_url}collections/{collection}/order"
 
         # Initial POST to order the data
-        payload = self.get_payload(year, month, variable, collection)
+        payload = self.build_order_payload(year, month, variable, collection)
         resp = self.request_with_retry(
             "POST",
             order_url,
@@ -129,7 +133,7 @@ class DEDLDownloader:
 
         return status_url
 
-    def download_file(self, status_url: str, save_path: str, month: str):
+    def poll_order_and_download(self, status_url: str, save_path: str, month: str):
         """Polls a single order until finished, then streams the download."""
         print(f"⏳ Polling order {month}... ", end="\r", flush=True)
         start = time.time()
@@ -183,7 +187,6 @@ class DEDLDownloader:
     def download_year(
         self, year: int, variable: str, collection: str, output_dir: str = "./data/raw"
     ) -> list[bool]:
-        os.makedirs(output_dir, exist_ok=True)
         pending_orders: list[dict[str, str]] = []
 
         if collection == "EO.ECMWF.DAT.ERA5_LAND_HOURLY":
@@ -202,7 +205,9 @@ class DEDLDownloader:
                     print(f"    ✅ Month {m_str} already exists, skipping order.")
                     continue
                 try:
-                    status_url = self.place_order(year, month, variable, collection)
+                    status_url = self.submit_order_request(
+                        year, month, variable, collection
+                    )
                     pending_orders.append(
                         {"url": status_url, "path": save_path, "month": m_str}
                     )
@@ -216,9 +221,7 @@ class DEDLDownloader:
                 print(f"    ✅ Year {year} already exists, skipping order.")
                 return []
             try:
-                status_url = self.place_order(
-                    year, 0, variable, collection
-                )
+                status_url = self.submit_order_request(year, 0, variable, collection)
                 pending_orders.append(
                     {"url": status_url, "path": save_path, "month": "full_year"}
                 )
@@ -234,7 +237,9 @@ class DEDLDownloader:
         results = []
 
         for order in pending_orders:
-            success = self.download_file(order["url"], order["path"], order["month"])
+            success = self.poll_order_and_download(
+                order["url"], order["path"], order["month"]
+            )
             results.append(success)
 
         return results

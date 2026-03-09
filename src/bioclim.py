@@ -8,7 +8,7 @@ import rioxarray # noqa: F401
 from dask.distributed import LocalCluster, Client
 
 
-def temperature_raw_to_monthly(
+def convert_temperature_raw_to_monthly(
     year: int,
     raw_dir: str = "./data/raw",
     out_dir: str = "./data/monthly",
@@ -20,8 +20,6 @@ def temperature_raw_to_monthly(
     temp_lat_chunk: int = 300,
     temp_lon_chunk: int = 300,
 ):
-    # Ensure output directory exists
-    os.makedirs(out_dir, exist_ok=True)
 
     cluster = None
     if dask_mode == "local":
@@ -67,8 +65,8 @@ def temperature_raw_to_monthly(
     # monthly = ds_daily.groupby("valid_time.month").mean()
 
     monthly = ds_daily.resample(valid_time="MS").mean()
-    
-    monthly = clean_datasets(monthly)
+
+    monthly = prune_dataset_metadata(monthly)
 
     # --- Write to a temp file first ---
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".nc", dir=out_dir)
@@ -84,11 +82,9 @@ def temperature_raw_to_monthly(
     print(f"Saved monthly file: {final_path}")
 
 
-def water_raw_to_monthly(
+def convert_soil_water_raw_to_monthly(
     year: int, raw_dir: str = "./data/raw", out_dir: str = "./data/monthly"
 ):
-
-    os.makedirs(out_dir, exist_ok=True)
 
     ds_1 = xr.open_dataset(
         f"{raw_dir}/volumetric_soil_water_layer_1_{year}.nc", engine="netcdf4"
@@ -105,11 +101,16 @@ def water_raw_to_monthly(
     ds_water = ds_water.assign_coords(month=ds_water.valid_time.dt.month)
     ds_water = ds_water.resample(valid_time="MS").mean()
 
-    ds_water = clean_datasets(ds_water)
+    ds_water = prune_dataset_metadata(ds_water)
 
     ds_water.to_netcdf(f"{out_dir}/water_monthly_{year}.nc")
 
-def clean_datasets(ds: xr.Dataset, allowed_attrs:list[str]=["units", "long_name"], allowed_coords:list[str]=["valid_time", "latitude", "longitude"]) -> xr.Dataset:
+
+def prune_dataset_metadata(
+    ds: xr.Dataset,
+    allowed_attrs: list[str] = ["units", "long_name"],
+    allowed_coords: list[str] = ["valid_time", "latitude", "longitude"],
+) -> xr.Dataset:
     ds.attrs = {}
     for var in ds.data_vars:
         ds[var].attrs = {k: v for k, v in ds[var].attrs.items() if k in allowed_attrs}
@@ -118,10 +119,13 @@ def clean_datasets(ds: xr.Dataset, allowed_attrs:list[str]=["units", "long_name"
     ds = ds.drop_vars(drop_coords)
     return ds
 
-def climatological_aggregate(
-    data_dir: str = "./data/monthly", out_dir: str = "./data/climatology"
+
+def build_monthly_climatology(
+    data_dir: str = "./data/monthly",
+    out_file: str = "./data/climatology/climate_monthly.nc",
+    start_year: int = 1981,
+    end_year: int = 2010,
 ):
-    os.makedirs(out_dir, exist_ok=True)
     ds_temp = xr.open_mfdataset(
         f"{data_dir}/temperature_monthly_*.nc", engine="netcdf4"
     )
@@ -136,20 +140,19 @@ def climatological_aggregate(
     )
 
     clim = ds.groupby("valid_time.month").mean("valid_time")
-    clim = clean_datasets(clim)
-    
+    clim = prune_dataset_metadata(clim)
+
     # Add CRS information and reproject coordinates
     clim = clim.rio.write_crs("EPSG:4326")
-    clim.coords["longitude"] = (((clim.longitude + 180) % 360) - 180)
+    clim.coords["longitude"] = ((clim.longitude + 180) % 360) - 180
     clim = clim.sortby("longitude")
-    
-    clim.to_netcdf(f"{out_dir}/climatology_monthly.nc")
+
+    clim.to_netcdf(out_file)
 
 
-def calc_bioclim(data_dir: str = "./data/climatology", out_dir: str = "./data/bioclim"):
-    os.makedirs(out_dir, exist_ok=True)
-    out_file = f"{out_dir}/bioclim.nc"
-    ds = xr.open_dataset(f"{data_dir}/climatology_monthly.nc", engine="netcdf4")
+def compute_bioclim_layers(climatology_file: str, out_file: str):
+
+    ds = xr.open_dataset(climatology_file, engine="netcdf4")
 
     quarter_index = ((ds.month - 1) // 3) + 1
 
