@@ -67,11 +67,11 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "dotenv" },
     { name = "mypy" },
     { name = "ruff" },
 ]
 notebooks = [
-    { name = "dotenv" },
     { name = "ipykernel" },
     { name = "matplotlib" },
 ]
@@ -92,11 +92,11 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "dotenv", specifier = ">=0.9.9" },
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "ruff", specifier = ">=0.15.2" },
 ]
 notebooks = [
-    { name = "dotenv", specifier = ">=0.9.9" },
     { name = "ipykernel" },
     { name = "matplotlib" },
 ]

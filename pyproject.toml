@@ -21,10 +21,10 @@ dependencies = [
 dev = [
     "ruff>=0.15.2",
     "mypy>=1.19.1",    
+    "dotenv>=0.9.9",
 ]
 
 notebooks = [
     "matplotlib",
     "ipykernel",
-    "dotenv>=0.9.9",
 ]

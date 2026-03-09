@@ -1,0 +1,8 @@
+services:
+  bioclim:
+    build: .
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env 
+    command: uv run main.py --start-year 2022 --end-year 2023
