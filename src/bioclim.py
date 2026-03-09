@@ -4,8 +4,9 @@ import tempfile
 
 from dask import config as dask_config
 import xarray as xr
-import rioxarray # noqa: F401
+import rioxarray  # noqa: F401
 from dask.distributed import LocalCluster, Client
+import glob
 
 
 def convert_temperature_raw_to_monthly(
@@ -129,7 +130,23 @@ def build_monthly_climatology(
     ds_temp = xr.open_mfdataset(
         f"{data_dir}/temperature_monthly_*.nc", engine="netcdf4"
     )
-    ds_water = xr.open_mfdataset(f"{data_dir}/water_monthly_*.nc", engine="netcdf4")
+    temp_files = sorted(
+        [
+            f
+            for f in glob.glob(f"{data_dir}/temperature_monthly_*.nc")
+            if int(f.split("_")[-1].split(".")[0]) in range(start_year, end_year + 1)
+        ]
+    )
+    ds_temp = xr.open_mfdataset(temp_files, engine="netcdf4")
+
+    water_files = sorted(
+        [
+            f
+            for f in glob.glob(f"{data_dir}/water_monthly_*.nc")
+            if int(f.split("_")[-1].split(".")[0]) in range(start_year, end_year + 1)
+        ]
+    )
+    ds_water = xr.open_mfdataset(water_files, engine="netcdf4")
     ds = xr.Dataset(
         {
             "T_mean": ds_temp.T_mean,
