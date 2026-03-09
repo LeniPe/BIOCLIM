@@ -1,6 +1,7 @@
 import os
 import time
 import requests
+import tempfile
 from destinelab import AuthHandler  # type: ignore
 
 
@@ -153,23 +154,40 @@ class DEDLDownloader:
             if status == "succeeded":
                 print("\n✅ Order succeeded, downloading...", flush=True)
                 download_url = data["assets"]["downloadLink"]["href"]
-                r = self.request_with_retry(
-                    "GET",
-                    download_url,
-                    stream=True,
-                    error_message="Failed to download file",
-                    expected_status=200,
-                    max_retries=3,
-                    retry_delay=20,
-                )
-                with r:
-                    with open(save_path, "wb") as f:
-                        for chunk in r.iter_content(
-                            chunk_size=1024 * 1024
-                        ):  # 1MB chunks
-                            f.write(chunk)
-                print(f"💾 Downloaded to {save_path}", flush=True)
-                return True
+
+                for attempt in range(1, 4):
+                    try:
+                        r = self.session.get(download_url, stream=True)
+                        with r:
+                            r.raise_for_status()
+                            target_dir = os.path.dirname(save_path) or "."
+
+                            tmp_path = None
+                            try:
+                                with tempfile.NamedTemporaryFile(
+                                    dir=target_dir, delete=False
+                                ) as tmp:
+                                    tmp_path = tmp.name
+                                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                                        if chunk:
+                                            tmp.write(chunk)
+
+                                # Atomically move the temp file into place
+                                os.replace(tmp_path, save_path)
+                                print(f"💾 Downloaded to {save_path}", flush=True)
+                                return True
+                            except Exception:
+                                # Cleanup temporary file if it still exists
+                                if tmp_path and os.path.exists(tmp_path):
+                                    os.remove(tmp_path)
+
+                    except Exception as e:
+                        print(
+                            f"    ❌ Failed to download month {month}, attempt {attempt}: {e}"
+                        )
+                        if attempt == 3:
+                            return False
+                        time.sleep(20)
             elif status == "failed":
                 print("\n❌ Order failed", flush=True)
                 return False
