@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import tempfile
+from netCDF4 import Dataset  # type: ignore
 from destinelab import AuthHandler  # type: ignore
 
 
@@ -134,60 +135,111 @@ class DEDLDownloader:
 
         return status_url
 
+    def _fetch_order_status(self, status_url: str) -> dict:
+        status_resp = self.request_with_retry(
+            "GET",
+            status_url,
+            error_message="Failed to get order status",
+            expected_status=200,
+            max_retries=3,
+            retry_delay=20,
+        )
+        return status_resp.json()
+
+    def _download_file_atomically(
+        self, download_url: str, save_path: str
+    ) -> tuple[int, int | None]:
+        response = self.session.get(download_url, stream=True)
+        with response:
+            response.raise_for_status()
+            target_dir = os.path.dirname(save_path) or "."
+            content_length_header = response.headers.get("Content-Length")
+            expected_size = (
+                int(content_length_header)
+                if content_length_header and content_length_header.isdigit()
+                else None
+            )
+
+            tmp_path = None
+            try:
+                bytes_written = 0
+                with tempfile.NamedTemporaryFile(dir=target_dir, delete=False) as tmp:
+                    tmp_path = tmp.name
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            tmp.write(chunk)
+                            bytes_written += len(chunk)
+
+                os.replace(tmp_path, save_path)
+                return bytes_written, expected_size
+            except Exception:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                raise
+
+    def _validate_netcdf_file(
+        self, file_path: str, expected_size: int | None = None
+    ) -> None:
+        actual_size = os.path.getsize(file_path)
+        if expected_size is not None and actual_size != expected_size:
+            raise ValueError(
+                f"Content-Length mismatch for {file_path}: expected {expected_size} bytes, got {actual_size} bytes"
+            )
+
+        with Dataset(file_path, mode="r") as dataset:
+            if not dataset.variables:
+                raise ValueError(f"No variables found in NetCDF file: {file_path}")
+
+            first_var_name = next(iter(dataset.variables))
+            first_var = dataset.variables[first_var_name]
+            if first_var.ndim == 0:
+                first_var[...]
+            else:
+                indexers = tuple(0 for _ in range(first_var.ndim))
+                first_var[indexers]
+
+    def _download_and_validate(
+        self,
+        download_url: str,
+        save_path: str,
+        month: str,
+        max_attempts: int = 3,
+        retry_delay: int = 20,
+    ) -> bool:
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _, expected_size = self._download_file_atomically(
+                    download_url, save_path
+                )
+                self._validate_netcdf_file(save_path, expected_size=expected_size)
+                print(f"💾 Downloaded and validated {save_path}", flush=True)
+                return True
+            except Exception as e:
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+                print(
+                    f"    ❌ Failed to download/validate month {month}, attempt {attempt}: {e}",
+                    flush=True,
+                )
+                if attempt == max_attempts:
+                    return False
+                time.sleep(retry_delay)
+
+        return False
+
     def poll_order_and_download(self, status_url: str, save_path: str, month: str):
         """Polls a single order until finished, then streams the download."""
         print(f"⏳ Polling order {month}... ", end="\r", flush=True)
         start = time.time()
         while True:
-            status_resp = self.request_with_retry(
-                "GET",
-                status_url,
-                error_message="Failed to get order status",
-                expected_status=200,
-                max_retries=3,
-                retry_delay=20,
-            )
-            data = status_resp.json()
+            data = self._fetch_order_status(status_url)
 
             status = data["properties"].get("order:status")
 
             if status == "succeeded":
                 print("\n✅ Order succeeded, downloading...", flush=True)
                 download_url = data["assets"]["downloadLink"]["href"]
-
-                for attempt in range(1, 4):
-                    try:
-                        r = self.session.get(download_url, stream=True)
-                        with r:
-                            r.raise_for_status()
-                            target_dir = os.path.dirname(save_path) or "."
-
-                            tmp_path = None
-                            try:
-                                with tempfile.NamedTemporaryFile(
-                                    dir=target_dir, delete=False
-                                ) as tmp:
-                                    tmp_path = tmp.name
-                                    for chunk in r.iter_content(chunk_size=1024 * 1024):
-                                        if chunk:
-                                            tmp.write(chunk)
-
-                                # Atomically move the temp file into place
-                                os.replace(tmp_path, save_path)
-                                print(f"💾 Downloaded to {save_path}", flush=True)
-                                return True
-                            except Exception:
-                                # Cleanup temporary file if it still exists
-                                if tmp_path and os.path.exists(tmp_path):
-                                    os.remove(tmp_path)
-
-                    except Exception as e:
-                        print(
-                            f"    ❌ Failed to download month {month}, attempt {attempt}: {e}"
-                        )
-                        if attempt == 3:
-                            return False
-                        time.sleep(20)
+                return self._download_and_validate(download_url, save_path, month)
             elif status == "failed":
                 print("\n❌ Order failed", flush=True)
                 return False
@@ -249,7 +301,7 @@ class DEDLDownloader:
                 print(f"    📦 Ordered year {year}")
 
         if len(pending_orders) == 0:
-            print("🎉 All data already downloaded!")
+            print("⚠️ No pending orders to process.")
             return []
         print("⏳ Monitoring queue and downloading...")
         results = []
