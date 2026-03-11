@@ -1,12 +1,53 @@
 import os
 import shutil
 import tempfile
+from netCDF4 import Dataset  # type: ignore
 
 from dask import config as dask_config
 import xarray as xr
 import rioxarray  # noqa: F401
 from dask.distributed import LocalCluster, Client
 import glob
+
+
+def _filter_valid_netcdf_files(
+    file_paths: list[str],
+    *,
+    remove_invalid: bool = True,
+    label: str = "files",
+) -> list[str]:
+    valid_files: list[str] = []
+    invalid_files: list[str] = []
+
+    for file_path in file_paths:
+        try:
+            with Dataset(file_path, mode="r") as dataset:
+                if not dataset.variables:
+                    raise ValueError("No variables found")
+                first_var_name = next(iter(dataset.variables))
+                first_var = dataset.variables[first_var_name]
+                if first_var.ndim == 0:
+                    first_var[...]
+                else:
+                    indexers = tuple(0 for _ in range(first_var.ndim))
+                    first_var[indexers]
+            valid_files.append(file_path)
+        except Exception as exc:
+            print(f"⚠️ Invalid NetCDF file skipped: {file_path} ({exc})")
+            invalid_files.append(file_path)
+
+    if remove_invalid:
+        for invalid_file in invalid_files:
+            try:
+                os.remove(invalid_file)
+                print(f"🗑️ Removed invalid NetCDF file: {invalid_file}")
+            except OSError as exc:
+                print(f"⚠️ Could not remove invalid file {invalid_file}: {exc}")
+
+    if not valid_files:
+        raise ValueError(f"No valid NetCDF {label} found after validation")
+
+    return valid_files
 
 
 def convert_temperature_raw_to_monthly(
@@ -41,9 +82,14 @@ def convert_temperature_raw_to_monthly(
 
     print(f"Processing {year}")
 
-    temp_file = f"{raw_dir}/2m_temperature_{year}_*.nc"
+    temp_files = sorted(glob.glob(f"{raw_dir}/2m_temperature_{year}_*.nc"))
+    temp_files = _filter_valid_netcdf_files(
+        temp_files,
+        remove_invalid=True,
+        label=f"temperature files for year {year}",
+    )
     ds_temp = xr.open_mfdataset(
-        temp_file,
+        temp_files,
         chunks={
             "valid_time": temp_time_chunk,
             "latitude": temp_lat_chunk,
@@ -86,13 +132,22 @@ def convert_temperature_raw_to_monthly(
 def convert_soil_water_raw_to_monthly(
     year: int, raw_dir: str = "./data/raw", out_dir: str = "./data/monthly"
 ):
+    layer_1_file = f"{raw_dir}/volumetric_soil_water_layer_1_{year}.nc"
+    layer_2_file = f"{raw_dir}/volumetric_soil_water_layer_2_{year}.nc"
 
-    ds_1 = xr.open_dataset(
-        f"{raw_dir}/volumetric_soil_water_layer_1_{year}.nc", engine="netcdf4"
-    )
-    ds_2 = xr.open_dataset(
-        f"{raw_dir}/volumetric_soil_water_layer_2_{year}.nc", engine="netcdf4"
-    )
+    valid_layer_1_file = _filter_valid_netcdf_files(
+        [layer_1_file],
+        remove_invalid=True,
+        label=f"soil water layer 1 file for year {year}",
+    )[0]
+    valid_layer_2_file = _filter_valid_netcdf_files(
+        [layer_2_file],
+        remove_invalid=True,
+        label=f"soil water layer 2 file for year {year}",
+    )[0]
+
+    ds_1 = xr.open_dataset(valid_layer_1_file, engine="netcdf4")
+    ds_2 = xr.open_dataset(valid_layer_2_file, engine="netcdf4")
 
     ds_water = xr.Dataset(
         {
@@ -127,15 +182,18 @@ def build_monthly_climatology(
     start_year: int = 1981,
     end_year: int = 2010,
 ):
-    ds_temp = xr.open_mfdataset(
-        f"{data_dir}/temperature_monthly_*.nc", engine="netcdf4"
-    )
+    print(f"⏳ Building monthly climatology from {start_year} to {end_year}")
     temp_files = sorted(
         [
             f
             for f in glob.glob(f"{data_dir}/temperature_monthly_*.nc")
             if int(f.split("_")[-1].split(".")[0]) in range(start_year, end_year + 1)
         ]
+    )
+    temp_files = _filter_valid_netcdf_files(
+        temp_files,
+        remove_invalid=True,
+        label="temperature monthly files",
     )
     ds_temp = xr.open_mfdataset(temp_files, engine="netcdf4")
 
@@ -145,6 +203,11 @@ def build_monthly_climatology(
             for f in glob.glob(f"{data_dir}/water_monthly_*.nc")
             if int(f.split("_")[-1].split(".")[0]) in range(start_year, end_year + 1)
         ]
+    )
+    water_files = _filter_valid_netcdf_files(
+        water_files,
+        remove_invalid=True,
+        label="water monthly files",
     )
     ds_water = xr.open_mfdataset(water_files, engine="netcdf4")
     ds = xr.Dataset(
@@ -168,6 +231,8 @@ def build_monthly_climatology(
 
 
 def compute_bioclim_layers(climatology_file: str, out_file: str):
+
+    print("⏳ Computing BIOCLIM layers.")
 
     ds = xr.open_dataset(climatology_file, engine="netcdf4")
 
@@ -258,5 +323,5 @@ def compute_bioclim_layers(climatology_file: str, out_file: str):
         }
     )
 
-    bio_ds = bio_ds.rio.write_crs("EPSG:4326")
-    bio_ds.to_netcdf(out_file)
+    bio_ds.to_array().to_netcdf(out_file)
+    print("✅ BIOCLIM layers saved to:", out_file)
