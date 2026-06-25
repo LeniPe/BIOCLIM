@@ -61,6 +61,7 @@ def convert_temperature_raw_to_monthly(
     temp_time_chunk: int = 24,
     temp_lat_chunk: int = 300,
     temp_lon_chunk: int = 300,
+    keep_raw: bool = True,
 ):
 
     cluster = None
@@ -128,9 +129,15 @@ def convert_temperature_raw_to_monthly(
     shutil.move(tmp_path, final_path)
     print(f"Saved monthly file: {final_path}")
 
+    if not keep_raw:
+        for file_path in temp_files:
+            os.remove(file_path)
 
 def convert_soil_water_raw_to_monthly(
-    year: int, raw_dir: str = "./data/raw", out_dir: str = "./data/monthly"
+    year: int,
+    raw_dir: str = "./data/raw",
+    out_dir: str = "./data/monthly",
+    keep_raw: bool = True,
 ):
     layer_1_file = f"{raw_dir}/volumetric_soil_water_layer_1_{year}.nc"
     layer_2_file = f"{raw_dir}/volumetric_soil_water_layer_2_{year}.nc"
@@ -160,6 +167,10 @@ def convert_soil_water_raw_to_monthly(
     ds_water = prune_dataset_metadata(ds_water)
 
     ds_water.to_netcdf(f"{out_dir}/water_monthly_{year}.nc")
+
+    if not keep_raw:
+        os.remove(valid_layer_1_file)
+        os.remove(valid_layer_2_file)
 
 
 def prune_dataset_metadata(

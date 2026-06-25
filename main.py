@@ -28,8 +28,9 @@ def main(
     if os.path.exists(outfile) and not force:
         print("✅ BIOCLIM layers already exist. Skipping download and processing.")
         return
+    
 
-    download_and_prepare_monthly_data(
+    success = download_and_prepare_monthly_data(
         start_year=start_year,
         end_year=end_year,
         raw_dir=raw_dir,
@@ -46,7 +47,10 @@ def main(
         poll_timeout_seconds=poll_timeout_seconds,
     )
 
-    build_monthly_climatology(
+    if not success:
+        raise Exception("❌ Failed to download and prepare monthly data. Please try again later.")
+    
+    build_monthly_climatology( 
         data_dir=monthly_dir,
         out_file=climatology_file,
         start_year=start_year,
