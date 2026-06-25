@@ -234,7 +234,11 @@ class DEDLDownloader:
         print(f"⏳ Polling order {month}... ", end="\r", flush=True)
         start = time.time()
         while True:
-            data = self._fetch_order_status(status_url)
+            try:
+                data = self._fetch_order_status(status_url)
+            except Exception as e:
+                print(f"\n❌ {e}", flush=True)
+                return False
 
             status = data["properties"].get("order:status")
 
