@@ -38,13 +38,17 @@ def download_and_prepare_monthly_data(
     temp_time_chunk: int,
     temp_lat_chunk: int,
     temp_lon_chunk: int,
-) -> None:
+    poll_timeout_seconds: int,
+) -> bool:
     downloader = DEDLDownloader()
 
     for year in range(start_year, end_year + 1):
         if not os.path.exists(f"{monthly_dir}/temperature_monthly_{year}.nc") or force:
             results = downloader.download_year(
-                year, "2m_temperature", "EO.ECMWF.DAT.ERA5_LAND_HOURLY"
+                year,
+                variable="2m_temperature",
+                collection="EO.ECMWF.DAT.ERA5_LAND_HOURLY",
+                poll_timeout_seconds=poll_timeout_seconds,
             )
             if not all(results):
                 raise Exception(
@@ -69,10 +73,16 @@ def download_and_prepare_monthly_data(
 
         if not os.path.exists(f"{monthly_dir}/water_monthly_{year}.nc") or force:
             results = downloader.download_year(
-                year, "volumetric_soil_water_layer_1", "EO.ECMWF.DAT.ERA5_LAND_MONTHLY"
+                year,
+                variable="volumetric_soil_water_layer_1",
+                collection="EO.ECMWF.DAT.ERA5_LAND_MONTHLY",
+                poll_timeout_seconds=poll_timeout_seconds,
             )
             results += downloader.download_year(
-                year, "volumetric_soil_water_layer_2", "EO.ECMWF.DAT.ERA5_LAND_MONTHLY"
+                year,
+                variable="volumetric_soil_water_layer_2",
+                collection="EO.ECMWF.DAT.ERA5_LAND_MONTHLY",
+                poll_timeout_seconds=poll_timeout_seconds,
             )
             if not all(results):
                 raise Exception(

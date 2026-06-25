@@ -123,7 +123,7 @@ class DEDLDownloader:
             json=payload,
             error_message="Order failed",
             expected_status=200,
-            max_retries=1,
+            max_retries=3,
             retry_delay=20,
         )
 
@@ -227,7 +227,9 @@ class DEDLDownloader:
 
         return False
 
-    def poll_order_and_download(self, status_url: str, save_path: str, month: str):
+    def poll_order_and_download(
+        self, status_url: str, save_path: str, month: str, poll_timeout_seconds: int = 30 * 60
+    ) -> bool:
         """Polls a single order until finished, then streams the download."""
         print(f"⏳ Polling order {month}... ", end="\r", flush=True)
         start = time.time()
@@ -249,13 +251,13 @@ class DEDLDownloader:
                 end="\r",
                 flush=True,
             )
-            if (stop - start) > 30 * 60:
+            if (stop - start) > poll_timeout_seconds:
                 print("\n⏰ Order polling timed out", flush=True)
                 return False
             time.sleep(30)
 
     def download_year(
-        self, year: int, variable: str, collection: str, output_dir: str = "./data/raw"
+        self, year: int, variable: str, collection: str, output_dir: str = "./data/raw", poll_timeout_seconds: int = 30 * 60
     ) -> list[bool]:
         pending_orders: list[dict[str, str]] = []
 
@@ -308,7 +310,10 @@ class DEDLDownloader:
 
         for order in pending_orders:
             success = self.poll_order_and_download(
-                order["url"], order["path"], order["month"]
+                status_url=order["url"],
+                save_path=order["path"],
+                month=order["month"],
+                poll_timeout_seconds=poll_timeout_seconds,
             )
             results.append(success)
 

@@ -18,6 +18,7 @@ def main(
     temp_time_chunk: int = 24,
     temp_lat_chunk: int = 300,
     temp_lon_chunk: int = 300,
+    poll_timeout_seconds: int = 30 * 60,
 ):
     load_dotenv()
     raw_dir, monthly_dir, climatology_file, outfile = initialize_data_paths(
@@ -42,6 +43,7 @@ def main(
         temp_time_chunk=temp_time_chunk,
         temp_lat_chunk=temp_lat_chunk,
         temp_lon_chunk=temp_lon_chunk,
+        poll_timeout_seconds=poll_timeout_seconds,
     )
 
     build_monthly_climatology(
@@ -105,6 +107,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.getenv("BIOCLIM_TEMP_LON_CHUNK", "-1")),
     )
+    parser.add_argument(
+        "--poll-timeout-seconds",
+        type=int,
+        default=int(os.getenv("BIOCLIM_POLL_TIMEOUT_SECONDS", str(30 * 60))),
+    )
     return parser.parse_args()
 
 
@@ -122,4 +129,5 @@ if __name__ == "__main__":
         temp_time_chunk=args.temp_time_chunk,
         temp_lat_chunk=args.temp_lat_chunk,
         temp_lon_chunk=args.temp_lon_chunk,
+        poll_timeout_seconds=args.poll_timeout_seconds,
     )
