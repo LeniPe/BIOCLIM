@@ -20,6 +20,9 @@ def _filter_valid_netcdf_files(
     invalid_files: list[str] = []
 
     for file_path in file_paths:
+        if not os.path.exists(file_path):
+            print(f"⚠️ File does not exist and will be skipped: {file_path}")
+            continue
         try:
             with Dataset(file_path, mode="r") as dataset:
                 if not dataset.variables:
@@ -142,16 +145,20 @@ def convert_soil_water_raw_to_monthly(
     layer_1_file = f"{raw_dir}/volumetric_soil_water_layer_1_{year}.nc"
     layer_2_file = f"{raw_dir}/volumetric_soil_water_layer_2_{year}.nc"
 
-    valid_layer_1_file = _filter_valid_netcdf_files(
-        [layer_1_file],
-        remove_invalid=True,
-        label=f"soil water layer 1 file for year {year}",
-    )[0]
-    valid_layer_2_file = _filter_valid_netcdf_files(
-        [layer_2_file],
-        remove_invalid=True,
-        label=f"soil water layer 2 file for year {year}",
-    )[0]
+    try:
+        valid_layer_1_file = _filter_valid_netcdf_files(
+            [layer_1_file],
+            remove_invalid=True,
+            label=f"soil water layer 1 file for year {year}",
+        )[0]
+        valid_layer_2_file = _filter_valid_netcdf_files(
+            [layer_2_file],
+            remove_invalid=True,
+            label=f"soil water layer 2 file for year {year}",
+        )[0]
+    except ValueError as e:
+        print(f"⚠️ Skipping soil water processing for year {year}: {e}")
+        return
 
     ds_1 = xr.open_dataset(valid_layer_1_file, engine="netcdf4")
     ds_2 = xr.open_dataset(valid_layer_2_file, engine="netcdf4")
@@ -167,6 +174,7 @@ def convert_soil_water_raw_to_monthly(
     ds_water = prune_dataset_metadata(ds_water)
 
     ds_water.to_netcdf(f"{out_dir}/water_monthly_{year}.nc")
+    print(f"Saved monthly file: {out_dir}/water_monthly_{year}.nc")
 
     if not keep_raw:
         os.remove(valid_layer_1_file)
